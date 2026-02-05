@@ -24,7 +24,6 @@ def load_data():
         df_inv = pd.DataFrame(columns=['Panel_ID', 'Status', 'Sub_Status', 'Location', 'Last_Updated'])
     else:
         df_inv = pd.read_excel(INVENTORY_FILE)
-        # Ensure Sub_Status column exists for upgrades
         if 'Sub_Status' not in df_inv.columns: df_inv['Sub_Status'] = "N/A"
     
     if not os.path.exists(HISTORY_FILE):
@@ -39,15 +38,16 @@ def save_data(df_inv, df_hist):
 
 # --- 2. USER INTERFACE ---
 
-st.set_page_config(layout="wide", page_title="Panel Holder Lifecycle Tracker")
+st.set_page_config(layout="wide", page_title="Scientific Panel Tracker")
 
 tech_names = load_list_from_txt(TECH_FILE, "Admin\nAnand")
+# master_holder_list is now used for VALIDATION and suggestions, not as a restriction
 master_holder_list = load_list_from_txt(HOLDER_LIST_FILE, "54R15564")
 df_inv, df_hist = load_data()
 
-st.title("Panel Holder Lifecycle Tracker")
+st.title("Panel Holder Tracking System")
 
-# --- TOP LAYER: MANAGEMENT KPI DASHBOARD ---
+# --- TOP LAYER: KPIs ---
 kpis = st.columns(5)
 total = len(df_inv)
 in_use = len(df_inv[df_inv['Status'] == 'In Use'])
@@ -67,126 +67,138 @@ st.divider()
 col_id, col_action = st.columns([1, 1.2])
 
 with col_id:
-    st.subheader("1. Identify Agent & Asset")
+    st.subheader("1. Identification")
     selected_tech = st.selectbox("Select Technician", options=tech_names)
-    pid_input = st.selectbox("Search/Scan Panel ID", options=[""] + master_holder_list)
+    
+    # CHANGED: Using text_input instead of selectbox for barcode compatibility
+    pid_input = st.text_input("Scan or Type Panel ID (e.g. 54R15564)").strip()
     
     if pid_input:
-        exists = pid_input in df_inv['Panel_ID'].values
-        if exists:
+        exists_in_db = pid_input in df_inv['Panel_ID'].values
+        exists_in_txt = pid_input in master_holder_list
+        
+        if exists_in_db:
             row = df_inv[df_inv['Panel_ID'] == pid_input].iloc[0]
-            st.info(f"Current Status: **{row['Status']}** | Sub-Status: **{row['Sub_Status']}**")
+            st.success(f"Verified: **{pid_input}**")
+            st.info(f"Current Status: {row['Status']} | Location: {row['Location']}")
         else:
-            st.warning("ID not in active tracking. Please initialize below.")
-            if st.button("Initialize this ID"):
-                new_asset = {'Panel_ID': pid_input, 'Status': 'Storage', 'Sub_Status': 'N/A', 'Location': 'Storage', 'Last_Updated': datetime.now()}
+            # This is where we handle NEW IDs
+            st.warning(f"ID **{pid_input}** is not in the tracking database.")
+            if not exists_in_txt:
+                st.error("Note: This ID is also missing from PanelHolders.txt master list.")
+            
+            if st.button(f"➕ Register {pid_input} Now"):
+                new_asset = {
+                    'Panel_ID': pid_input, 
+                    'Status': 'Storage', 
+                    'Sub_Status': 'N/A', 
+                    'Location': 'Storage', 
+                    'Last_Updated': datetime.now()
+                }
                 df_inv = pd.concat([df_inv, pd.DataFrame([new_asset])], ignore_index=True)
+                # We also append it to the txt file automatically to keep them synced
+                if not exists_in_txt:
+                    with open(HOLDER_LIST_FILE, "a") as f:
+                        f.write(f"\n{pid_input}")
+                
                 save_data(df_inv, df_hist)
+                st.success(f"ID {pid_input} is now registered and ready!")
                 st.rerun()
 
 with col_action:
     st.subheader("2. Action Logic")
+    # Only allow actions if ID exists in the tracking database
     if not pid_input or pid_input not in df_inv['Panel_ID'].values:
-        st.write("Please select a valid Panel ID.")
+        st.write("⬅️ *Identify or Register a Panel ID on the left to see actions.*")
     else:
-        op_type = st.radio("What are you doing?", ["Install to Machine", "Remove from Machine"], horizontal=True)
+        op_type = st.radio("Operation:", ["Install to Machine", "Remove from Machine"], horizontal=True)
         
         with st.form("lifecycle_form"):
-            final_status = ""
-            final_sub_status = "N/A"
-            final_location = ""
             category = "Production"
             
             if op_type == "Install to Machine":
                 final_location = st.selectbox("Select Machine:", MACHINES)
                 final_status = "In Use"
+                final_sub_status = "N/A"
             else:
-                # REMOVAL LOGIC
                 final_location = "Workshop"
                 reason_main = st.selectbox("Reason for Removal:", ["Repair", "Preventive Maintenance", "Damaged", "Other"])
-                
-                # Logic Gate: Failure Category
                 category = st.selectbox("Failure Source:", ["CSS", "Tape", "Other"])
                 
-                # Logic Gate: Conditional Comment for 'Other' category
-                other_cat_comment = ""
+                # Logic Gate: Conditional Comment for 'Other'
+                other_comment = ""
                 if category == "Other":
-                    other_cat_comment = st.text_input("Describe 'Other' Source:")
+                    other_comment = st.text_input("Describe 'Other' Source:")
                 
-                # Logic Gate: Repair Status
+                # Logic Gate: Repair Pipeline
                 if reason_main == "Repair":
                     final_sub_status = st.selectbox("Repair Status:", ["To check", "Waiting Parts", "Ready to Install"])
                     final_status = "Under Repair"
                 elif reason_main == "Preventive Maintenance":
                     final_status = "Under PM"
+                    final_sub_status = "N/A"
                 elif reason_main == "Damaged":
                     final_status = "Damaged"
+                    final_sub_status = "N/A"
                 else:
-                    final_status = "Unknown"
+                    final_status = "Other"
+                    final_sub_status = "N/A"
 
             notes = st.text_area("Detailed Comments")
             
-            if st.form_submit_button("COMMIT TO DATABASE"):
-                # Combine category comments if needed
-                full_comment = f"[{category}] {other_cat_comment} | {notes}" if category == "Other" else f"[{category}] {notes}"
-                
-                # Update Snapshot
-                df_inv.loc[df_inv['Panel_ID'] == pid_input, ['Status', 'Sub_Status', 'Location', 'Last_Updated']] = [final_status, final_sub_status, final_location, datetime.now()]
-                
-                # Log History
-                new_log = {
-                    'Date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    'Panel_ID': pid_input,
-                    'Action': op_type,
-                    'User': selected_tech,
-                    'Category': category,
-                    'Sub_Status': final_sub_status,
-                    'Comments': full_comment
-                }
-                df_hist = pd.concat([df_hist, pd.DataFrame([new_log])], ignore_index=True)
-                
-                save_data(df_inv, df_hist)
-                st.balloons()
-                st.rerun()
+            if st.form_submit_button("COMMIT TRANSACTION"):
+                # Data Integrity Check
+                if category == "Other" and not other_comment:
+                    st.error("Please explain the 'Other' failure source.")
+                else:
+                    full_comment = f"[{category}] {other_comment} | {notes}" if category == "Other" else f"[{category}] {notes}"
+                    
+                    df_inv.loc[df_inv['Panel_ID'] == pid_input, ['Status', 'Sub_Status', 'Location', 'Last_Updated']] = [final_status, final_sub_status, final_location, datetime.now()]
+                    
+                    new_log = {
+                        'Date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'Panel_ID': pid_input,
+                        'Action': op_type,
+                        'User': selected_tech,
+                        'Category': category,
+                        'Sub_Status': final_sub_status,
+                        'Comments': full_comment
+                    }
+                    df_hist = pd.concat([df_hist, pd.DataFrame([new_log])], ignore_index=True)
+                    
+                    save_data(df_inv, df_hist)
+                    st.toast("Updated Successfully!")
+                    st.rerun()
 
 st.divider()
 
-# --- BOTTOM LAYER: SCIENTIFIC ANALYTICS ---
-st.subheader("📊 Operational Analytics & Daily Trends")
-tab1, tab2, tab3 = st.tabs(["Real-Time Health", "Daily Activity Trends", "Detailed Audit Logs"])
+# --- BOTTOM LAYER: ANALYTICS ---
+st.subheader("📊 Operational Intelligence")
+t1, t2, t3 = st.tabs(["Real-Time Health", "Daily Activity Trends", "Audit Logs"])
 
-with tab1:
+with t1:
     c1, c2 = st.columns(2)
     with c1:
-        st.write("**Total Inventory Health**")
+        st.write("**Inventory Distribution**")
         fig_pie = px.pie(df_inv, names='Status', color='Status', 
                          color_discrete_map={"In Use":"#2ecc71", "Under Repair":"#e74c3c", "Under PM":"#f1c40f", "Damaged":"#9b59b6", "Storage":"#95a5a6"})
         st.plotly_chart(fig_pie, use_container_width=True)
     with c2:
-        st.write("**Repair Pipeline (Sub-Status)**")
-        repair_df = df_inv[df_inv['Status'] == 'Under Repair']
-        if not repair_df.empty:
-            fig_sub = px.bar(repair_df['Sub_Status'].value_counts().reset_index(), x='Sub_Status', y='count', color='Sub_Status')
+        st.write("**Repair Pipeline Queue**")
+        rep_df = df_inv[df_inv['Status'] == 'Under Repair']
+        if not rep_df.empty:
+            fig_sub = px.bar(rep_df['Sub_Status'].value_counts().reset_index(), x='Sub_Status', y='count', color='Sub_Status')
             st.plotly_chart(fig_sub, use_container_width=True)
-        else: st.info("No items currently in Repair pipeline.")
+        else: st.info("Repair pipeline is currently empty.")
 
-with tab2:
+with t2:
     if not df_hist.empty:
         df_hist['Date_Only'] = pd.to_datetime(df_hist['Date']).dt.date
-        
-        # Trend 1: Removals by Category (CSS, Tape, Other)
+        # Trend 1: Failure Category
         trend_cat = df_hist[df_hist['Action'] == "Remove from Machine"].groupby(['Date_Only', 'Category']).size().reset_index(name='Count')
-        fig_trend1 = px.line(trend_cat, x='Date_Only', y='Count', color='Category', title="Daily Removal Reasons (CSS vs Tape vs Other)", markers=True)
+        fig_trend1 = px.line(trend_cat, x='Date_Only', y='Count', color='Category', title="Daily Failures: CSS vs Tape vs Other", markers=True)
         st.plotly_chart(fig_trend1, use_container_width=True)
-        
-        # Trend 2: Overall Activity Volume
-        trend_act = df_hist.groupby(['Date_Only', 'Action']).size().reset_index(name='Count')
-        fig_trend2 = px.bar(trend_act, x='Date_Only', y='Count', color='Action', barmode='group', title="Daily Operational Volume")
-        st.plotly_chart(fig_trend2, use_container_width=True)
-    else:
-        st.info("No history data to plot trends yet.")
+    else: st.info("No history available.")
 
-with tab3:
+with t3:
     st.dataframe(df_hist.sort_values(by='Date', ascending=False), use_container_width=True)
-    csv = df_hist.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Export Logs for Management", csv, "panel_history.csv", "text/csv")
