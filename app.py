@@ -9,7 +9,7 @@ INVENTORY_FILE = 'inventory.xlsx'
 HISTORY_FILE = 'history.xlsx'
 TECH_FILE = 'Technicians.txt'
 HOLDER_LIST_FILE = 'PanelHolders.txt' # The new master list
-MACHINES = ["Machine 1", "Machine 2", "Machine 3"]
+MACHINES = ["ECP 101", "ECP 102", "ECP 103"]
 
 # --- 1. DATA ENGINE ---
 
