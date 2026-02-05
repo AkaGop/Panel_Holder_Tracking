@@ -8,7 +8,7 @@ import os
 INVENTORY_FILE = 'inventory.xlsx'
 HISTORY_FILE = 'history.xlsx'
 TECH_FILE = 'Technicians.txt'
-HOLDER_LIST_FILE = 'PanelHolders.txt'
+HOLDER_LIST_FILE = 'PanelID.txt'
 MACHINES = ["ECP 101", "ECP 102", "ECP 103"]
 
 # --- 1. DATA ENGINE ---
