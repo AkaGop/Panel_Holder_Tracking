@@ -45,7 +45,7 @@ st.set_page_config(layout="wide", page_title="Panel Holder Control Center")
 df_inv, df_hist = load_data()
 tech_names = load_technicians()
 
-st.title("🔬 Scientific Panel Holder Tracking System")
+st.title("Panel Holder Tracking System")
 
 # --- TOP LAYER: CAPACITY MANAGEMENT (For Management Reporting) ---
 kpi_cols = st.columns(len(MACHINES) + 1)
