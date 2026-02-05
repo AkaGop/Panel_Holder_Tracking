@@ -9,7 +9,7 @@ INVENTORY_FILE = 'inventory.xlsx'
 HISTORY_FILE = 'history.xlsx'
 TECH_FILE = 'Technicians.txt'
 HOLDER_LIST_FILE = 'PanelID.txt'  # UPDATED FILENAME
-MACHINES = ["ECP 101", "ECp 102", "ECp 103"]
+MACHINES = ["ECP 101", "ECP 102", "ECP 103"]
 
 # --- 1. DATA ENGINE ---
 
@@ -134,3 +134,78 @@ with col_action:
                 # Logic for 'Other' comment
                 other_comment = ""
                 if category == "Other":
+                    other_comment = st.text_input("Enter Details for 'Other' failure:")
+                
+                # Logic for Repair pipeline
+                if reason_main == "Repair":
+                    final_sub_status = st.selectbox("Repair Pipeline Status:", ["To check", "Waiting Parts", "Ready to Install"])
+                    final_status = "Under Repair"
+                elif reason_main == "Preventive Maintenance":
+                    final_status = "Under PM"
+                    final_sub_status = "N/A"
+                elif reason_main == "Damaged":
+                    final_status = "Damaged"
+                    final_sub_status = "N/A"
+                else:
+                    final_status = "Other"
+                    final_sub_status = "N/A"
+
+            notes = st.text_area("Observations / Feedback")
+            
+            if st.form_submit_button("SUBMIT TRANSACTION"):
+                if category == "Other" and not other_comment:
+                    st.error("Please provide details for the 'Other' category.")
+                else:
+                    full_comment = f"[{category}] {other_comment} | {notes}" if category == "Other" else f"[{category}] {notes}"
+                    
+                    # Update Live Inventory
+                    df_inv.loc[df_inv['Panel_ID'] == pid_input, ['Status', 'Sub_Status', 'Location', 'Last_Updated']] = [final_status, final_sub_status, final_location, datetime.now()]
+                    
+                    # Log History for Trends
+                    new_log = {
+                        'Date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'Panel_ID': pid_input,
+                        'Action': op_type,
+                        'User': selected_tech,
+                        'Category': category,
+                        'Sub_Status': final_sub_status,
+                        'Comments': full_comment
+                    }
+                    df_hist = pd.concat([df_hist, pd.DataFrame([new_log])], ignore_index=True)
+                    
+                    save_data(df_inv, df_hist)
+                    st.toast(f"Updated {pid_input} Successfully")
+                    st.rerun()
+
+st.divider()
+
+# --- BOTTOM LAYER: ANALYTICS & TRENDS ---
+st.subheader("📊 Operational Analytics & Daily Trends")
+t1, t2, t3 = st.tabs(["Real-Time Health", "Daily Activity Trends", "Detailed Audit Logs"])
+
+with t1:
+    c1, c2 = st.columns(2)
+    with c1:
+        st.write("**Inventory Snapshot**")
+        fig_pie = px.pie(df_inv, names='Status', color='Status', 
+                         color_discrete_map={"In Use":"#2ecc71", "Under Repair":"#e74c3c", "Under PM":"#f1c40f", "Damaged":"#9b59b6", "Storage":"#95a5a6"})
+        st.plotly_chart(fig_pie, use_container_width=True)
+    with c2:
+        st.write("**Repair Queue Status**")
+        rep_df = df_inv[df_inv['Status'] == 'Under Repair']
+        if not rep_df.empty:
+            fig_sub = px.bar(rep_df['Sub_Status'].value_counts().reset_index(), x='Sub_Status', y='count', color='Sub_Status')
+            st.plotly_chart(fig_sub, use_container_width=True)
+        else: st.info("No items in Repair pipeline.")
+
+with t2:
+    if not df_hist.empty:
+        df_hist['Date_Only'] = pd.to_datetime(df_hist['Date']).dt.date
+        # Trend Chart: Reasons for removal by date
+        trend_cat = df_hist[df_hist['Action'] == "Remove from Machine"].groupby(['Date_Only', 'Category']).size().reset_index(name='Count')
+        fig_trend = px.line(trend_cat, x='Date_Only', y='Count', color='Category', title="Failure Trends (CSS vs Tape vs Other)", markers=True)
+        st.plotly_chart(fig_trend, use_container_width=True)
+    else: st.info("No history logs found.")
+
+with t3:
+    st.dataframe(df_hist.sort_values(by='Date', ascending=False), use_container_width=True)
