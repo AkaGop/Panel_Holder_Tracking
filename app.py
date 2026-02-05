@@ -85,7 +85,7 @@ with col_id:
             # This is where we handle NEW IDs
             st.warning(f"ID **{pid_input}** is not in the tracking database.")
             if not exists_in_txt:
-                st.error("Note: This ID is also missing from PanelHolders.txt master list.")
+                st.error("Note: This ID is also missing from PanelID.txt master list.")
             
             if st.button(f"➕ Register {pid_input} Now"):
                 new_asset = {
